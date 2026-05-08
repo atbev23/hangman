@@ -11,7 +11,7 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     prelude::*,
     text::Line,
-    widgets::{Block, BorderType, Clear, Paragraph},
+    widgets::{Block, BorderType, Clear, Paragraph, Wrap},
 };
 
 const MAX_LIVES: u8 = 6;
@@ -97,35 +97,92 @@ impl Hangman {
     
         s
     }
+
+    fn is_won(&self) -> bool {
+        self.board() == self.word
+    }
     
     fn is_lost(&self) -> bool {
         self.lives == 0
     }
 }
 
-fn main() -> Result<()> {
-    let dict = Dictionary::new("word-list.txt");
-    let mut hangman = Hangman::new(dict.random()); // get a random word
-
-    // TODO: change to some ratatui loop
+fn app(terminal: &mut DefaultTerminal, hangman: &mut Hangman) -> std::io::Result<()> {
     loop {
-
-        print!("\x1B[2J\x1B[1;1H"); // clear screen
-        println!("{}", hangman.board());
-        println!("{}", hangman.lives());
-
-        if let Event::Key(key) = event::read()? {
-            match key.code {
-                KeyCode::Char(c) => hangman.guess(c),
-                KeyCode::Esc => break,
-                _ => {}
-            }
+        if !handle_key_event(hangman)? {
+            break Ok(());
         }
+
+        terminal.draw(|frame| render(frame, hangman))?;
 
         if hangman.is_lost() {
-            break;
+            // play some you lost message
+            // press e to exit or r to replay
+            break Ok(());
+        }
+
+        if hangman.is_won() {
+            // play some you won message
+            // press e to exit or r to replay
+            break Ok(());
         }
     }
+}
+
+fn render(frame: &mut Frame, app: &mut Hangman) {
+    let [main_area, sub_area] = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Length(9),
+    ])
+    .areas(frame.area());
+
+    let guessed_height = (app.guesses.len() / 4 + 3) as u16;
+    let [guessed_area] = Layout::vertical([Constraint::Length(guessed_height)]).areas(sub_area);
+
+    let mut guesses: Vec<_> = app.guesses.iter().copied().collect();
+
+
+    let guessed_text = guesses
+        .into_iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    frame.render_widget(" ", main_area);
+    frame.render_widget(
+        Paragraph::new(guessed_text)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::bordered()
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Yellow))
+            ),
+        guessed_area,
+    );
+}
+
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
+    let dict = Dictionary::new("word-list.txt");
+    let mut hangman = Hangman::new(dict.random()); // get a random word
+    ratatui::run(|terminal| app(terminal, &mut hangman))?;
 
     Ok(())
+}
+
+fn handle_key_event(hangman: &mut Hangman) -> std::io::Result<bool> {
+    if let Event::Key(key) = event::read()? {
+        match key.code {
+            KeyCode::Char(c) => {
+                if c.is_ascii_alphabetic() {
+                    hangman.guess(c.to_ascii_lowercase());
+                }
+            }
+
+            KeyCode::Esc => return Ok(false),
+            _ => {}
+        }
+    }
+    Ok(true)
 }
